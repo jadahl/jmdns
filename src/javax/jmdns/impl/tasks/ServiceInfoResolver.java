@@ -38,13 +38,20 @@ public class ServiceInfoResolver extends TimerTask
      */
     int count = 0;
     private ServiceInfoImpl info;
+    private boolean persistent = false;
 
-    public ServiceInfoResolver(JmDNSImpl jmDNSImpl, ServiceInfoImpl info)
+    public ServiceInfoResolver(JmDNSImpl jmDNSImpl, ServiceInfoImpl info, boolean persistent)
     {
+        this.persistent = persistent;
         this.jmDNSImpl = jmDNSImpl;
         this.info = info;
         info.setDns(this.jmDNSImpl);
         this.jmDNSImpl.addListener(info, new DNSQuestion(info.getQualifiedName(), DNSConstants.TYPE_ANY, DNSConstants.CLASS_IN));
+    }
+
+    public ServiceInfoResolver(JmDNSImpl jmDNSImpl, ServiceInfoImpl info)
+    {
+        this(jmDNSImpl, info, false);
     }
 
     public void start(Timer timer)
@@ -80,7 +87,12 @@ public class ServiceInfoResolver extends TimerTask
                 {
                     // After three queries, we can quit.
                     this.cancel();
-                    this.jmDNSImpl.removeListener(info);
+
+                    // if the persistent flag is on, keep listen for packets
+                    if (!isPersistent())
+                    {
+                        this.jmDNSImpl.removeListener(info);
+                    }
                 }
             }
             else
@@ -97,5 +109,10 @@ public class ServiceInfoResolver extends TimerTask
             logger.log(Level.WARNING, "run() exception ", e);
             this.jmDNSImpl.recover();
         }
+    }
+
+    private boolean isPersistent()
+    {
+        return persistent;
     }
 }

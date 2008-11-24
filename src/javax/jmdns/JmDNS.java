@@ -93,6 +93,20 @@ public abstract class JmDNS
      * @param name unqualified service name, such as <code>foobar</code> .
      */
     public abstract void requestServiceInfo(String type, String name);
+
+    /**
+     * Request service information. The information about the service is
+     * requested and the ServiceListener.resolveService method is called as soon
+     * as it is available.
+     * <p/>
+     * Usage note: Do not call this method from the AWT event dispatcher thread.
+     * You will make the user interface unresponsive.
+     *
+     * @param type full qualified service type, such as <code>_http._tcp.local.</code> .
+     * @param name unqualified service name, such as <code>foobar</code> .
+     * @param persistent if true ServiceListener.resolveService will be called whenever new new information is received.
+     */
+    public abstract void requestServiceInfo(String type, String name, boolean persistent);
     
     /**
      * Request service information. The information about the service is requested
@@ -103,6 +117,17 @@ public abstract class JmDNS
      * @param timeout timeout in milliseconds
      */
     public abstract void requestServiceInfo(String type, String name, int timeout);
+
+    /**
+     * Request service information. The information about the service is requested
+     * and the ServiceListener.resolveService method is called as soon as it is available.
+     *
+     * @param type    full qualified service type, such as <code>_http._tcp.local.</code> .
+     * @param name    unqualified service name, such as <code>foobar</code> .
+     * @param persistent if true ServiceListener.resolveService will be called whenever new new information is received.
+     * @param timeout timeout in milliseconds
+     */
+    public abstract void requestServiceInfo(String type, String name, boolean persistent, int timeout);
 
     /**
      * Listen for service types.
@@ -139,6 +164,10 @@ public abstract class JmDNS
      * The name of the service may be changed to make it unique.
      */
     public abstract void registerService(ServiceInfo info) throws IOException;
+
+    /** Reannounce a service.
+     */
+    public abstract void reannounceService(ServiceInfo info) throws IOException;
 
     /**
      * Unregister a service. The service should have been registered.

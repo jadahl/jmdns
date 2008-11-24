@@ -165,4 +165,18 @@ public abstract class ServiceInfo
 
     public abstract String getNiceTextString();
 
+    /**
+     * Set the text for the service.
+     *
+     * @param text the raw byte representation of the text field.
+     */
+    public abstract void setText(byte [] text);
+
+    /**
+     * Set the text for the service.
+     *
+     * @param props a key=value map that will be encoded into raw bytes.
+     */
+    public abstract void setText(Hashtable props);
+
 }

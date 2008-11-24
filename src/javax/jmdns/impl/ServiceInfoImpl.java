@@ -56,6 +56,7 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     private byte text[];
     Hashtable props;
     InetAddress addr;
+    private boolean handled = false;
 
     /**
      * @see javax.jmdns.ServiceInfo#create(String, String, int, String)
@@ -94,46 +95,7 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
         this(type, name, port, weight, priority, new byte[0]);
         if (props != null)
         {
-            try
-            {
-                ByteArrayOutputStream out = new ByteArrayOutputStream(256);
-                for (Enumeration e = props.keys(); e.hasMoreElements();)
-                {
-                    String key = (String) e.nextElement();
-                    Object val = props.get(key);
-                    ByteArrayOutputStream out2 = new ByteArrayOutputStream(100);
-                    writeUTF(out2, key);
-                    if (val instanceof String)
-                    {
-                        out2.write('=');
-                        writeUTF(out2, (String) val);
-                    }
-                    else
-                    {
-                        if (val instanceof byte[])
-                        {
-                            out2.write('=');
-                            byte[] bval = (byte[]) val;
-                            out2.write(bval, 0, bval.length);
-                        }
-                        else
-                        {
-                            if (val != NO_VALUE)
-                            {
-                                throw new IllegalArgumentException("invalid property value: " + val);
-                            }
-                        }
-                    }
-                    byte data[] = out2.toByteArray();
-                    out.write(data.length);
-                    out.write(data, 0, data.length);
-                }
-                this.setText(out.toByteArray());
-            }
-            catch (IOException e)
-            {
-                throw new RuntimeException("unexpected exception: " + e);
-            }
+            this.setText(props);
         }
     }
 
@@ -351,6 +313,24 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     }
 
     /**
+     * Set record as handled.
+     */
+    void setHandled()
+    {
+        handled = true;
+    }
+
+    /**
+     * Check if record has been handled.
+     *
+     * @return true if record has been handled.
+     */
+    boolean isHandled()
+    {
+        return handled;
+    }
+
+    /**
      * Write a UTF string with a length to a stream.
      */
     void writeUTF(OutputStream out, String str) throws IOException
@@ -513,16 +493,21 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
                     {
                         DNSRecord.Text txt = (DNSRecord.Text) rec;
                         setText(txt.text);
+                        getDns().handleNewTXT(this);
                     }
                     break;
             }
+
             // Future Design Pattern
             // This is done, to notify the wait loop in method
             // JmDNS.getServiceInfo(type, name, timeout);
-            if (hasData() && getDns() != null)
+            // use isHandled / setHandled instead of getDns
+            //if (hasData() && getDns() != null)
+            if (hasData() && !isHandled())
             {
                 getDns().handleServiceResolved(this);
-                setDns(null);
+                //setDns(null);
+                setHandled();
             }
             synchronized (this)
             {
@@ -557,6 +542,14 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     {
         state = state.revert();
         notifyAll();
+    }
+
+    /**
+     * Sets the state to the first announce state.
+     */
+    synchronized void setStateAnnounce()
+    {
+        state = DNSState.ANNOUNCING_1;
     }
 
     /**
@@ -636,6 +629,12 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
                 ttl, getText()), 0);
     }
 
+    public void addTextAnswer(DNSOutgoing out, int ttl) throws IOException
+    {
+        out.addAnswer(new Text(getQualifiedName(), DNSConstants.TYPE_TXT, DNSConstants.CLASS_IN|DNSConstants.CLASS_UNIQUE,
+                ttl, getText()), 0);
+    }
+
     public void setTask(TimerTask task)
     {
         this.task = task;
@@ -649,6 +648,50 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     public void setText(byte [] text)
     {
         this.text = text;
+    }
+
+    public void setText(Hashtable props)
+    {
+        try
+        {
+            ByteArrayOutputStream out = new ByteArrayOutputStream(256);
+            for (Enumeration e = props.keys(); e.hasMoreElements();)
+            {
+                String key = (String) e.nextElement();
+                Object val = props.get(key);
+                ByteArrayOutputStream out2 = new ByteArrayOutputStream(100);
+                writeUTF(out2, key);
+                if (val instanceof String)
+                {
+                    out2.write('=');
+                    writeUTF(out2, (String) val);
+                }
+                else
+                {
+                    if (val instanceof byte[])
+                    {
+                        out2.write('=');
+                        byte[] bval = (byte[]) val;
+                        out2.write(bval, 0, bval.length);
+                    }
+                    else
+                    {
+                        if (val != NO_VALUE)
+                        {
+                            throw new IllegalArgumentException("invalid property value: " + val);
+                        }
+                    }
+                }
+                byte data[] = out2.toByteArray();
+                out.write(data.length);
+                out.write(data, 0, data.length);
+            }
+            this.setText(out.toByteArray());
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("unexpected exception: " + e);
+        }
     }
 
     public byte [] getText()

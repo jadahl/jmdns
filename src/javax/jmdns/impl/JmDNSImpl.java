@@ -29,6 +29,7 @@ import javax.jmdns.ServiceInfo;
 import javax.jmdns.ServiceListener;
 import javax.jmdns.ServiceTypeListener;
 import javax.jmdns.impl.tasks.Announcer;
+import javax.jmdns.impl.tasks.TextAnnouncer;
 import javax.jmdns.impl.tasks.Canceler;
 import javax.jmdns.impl.tasks.Prober;
 import javax.jmdns.impl.tasks.RecordReaper;
@@ -432,7 +433,15 @@ public class JmDNSImpl extends JmDNS
      */
     public void requestServiceInfo(String type, String name)
     {
-        requestServiceInfo(type, name, 3 * 1000);
+        requestServiceInfo(type, name, false, 3 * 1000);
+    }
+    /**
+     * @see javax.jmdns.JmDNS#requestServiceInfo(java.lang.String,
+     *  java.lang.String, boolean)
+     */
+    public void requestServiceInfo(String type, String name, boolean persistent)
+    {
+        requestServiceInfo(type, name, persistent, 3 * 1000);
     }
 
     /**
@@ -441,9 +450,19 @@ public class JmDNSImpl extends JmDNS
      */
     public void requestServiceInfo(String type, String name, int timeout)
     {
+        requestServiceInfo(type, name, false, timeout);
+    }
+
+    /**
+     * @see javax.jmdns.JmDNS#requestServiceInfo(java.lang.String,
+     *  java.lang.String, boolean, int)
+     */
+    public void requestServiceInfo(String type, String name,
+            boolean persistent, int timeout)
+    {
         registerServiceType(type);
         final ServiceInfoImpl info = new ServiceInfoImpl(type, name);
-        new ServiceInfoResolver(this, info).start(timer);
+        new ServiceInfoResolver(this, info, persistent).start(timer);
 
         try
         {
@@ -462,6 +481,10 @@ public class JmDNSImpl extends JmDNS
             // empty
         }
     }
+
+    /**
+     * @see javax.jmdns.JmDNS#
+     */
 
     void handleServiceResolved(ServiceInfoImpl info)
     {
@@ -484,6 +507,10 @@ public class JmDNSImpl extends JmDNS
                 ((ServiceListener) iterator.next()).serviceResolved(event);
             }
         }
+    }
+
+    void handleNewTXT(ServiceInfoImpl info) {
+        handleServiceResolved(info);
     }
 
     /**
@@ -628,6 +655,44 @@ public class JmDNSImpl extends JmDNS
             // empty
         }
         logger.fine("registerService() JmDNS registered service as " + info);
+    }
+
+    /**
+     * @see javax.jmdns.JMDNS#reannounceService(javax.jmdns.ServiceInfo)
+     */
+    public void reannounceService(javax.jmdns.ServiceInfo infoAbstract) throws IOException
+    {
+
+        final ServiceInfoImpl info = (ServiceInfoImpl) infoAbstract;
+
+        if (services.containsKey(info.getQualifiedName().toLowerCase()))
+        {
+            ServiceInfoImpl info_tmp = (ServiceInfoImpl)services.get(info.getQualifiedName().toLowerCase());
+
+            info.setStateAnnounce();
+
+            startTextAnnouncer();
+            //new /* Service */Prober(this).start(timer);
+            try 
+            {
+                synchronized (info)
+                {
+                    while (info.getState().compareTo(DNSState.ANNOUNCED) < 0)
+                    {
+                        info.wait();
+                    }
+                }
+            }
+            catch (final InterruptedException e)
+            {
+                // empty
+            }
+            logger.fine("reannounceService() JmDNS reannounced service " + info);
+        }
+        else
+        {
+            logger.fine("reannounceService() service to be announced not found: " + info);
+        }
     }
 
     /**
@@ -971,26 +1036,66 @@ public class JmDNSImpl extends JmDNS
             final boolean expired = rec.isExpired(now);
 
             // update the cache
-            final DNSRecord c = (DNSRecord) cache.get(rec);
-            if (c != null)
+            synchronized (cache)
             {
-                if (expired)
+                /*
+                 * NOTE TO SELF:
+
+
+                 Cache stores every different cache... 
+                 Change so that only one TXT is stored
+
+                 add here:
+                 check if TXT
+                 if TXT new behaviour -> look for TXT entry ->
+                 compare less than before (dont compare TXT fields)
+    
+*/
+                final DNSRecord c;
+
+                // Only store / use ONE TXT record in cache.
+                if (rec instanceof DNSRecord.Text)
                 {
-                    isInformative = true;
-                    cache.remove(c);
+                    c = (DNSRecord) cache.get(rec.getName(),
+                            DNSConstants.TYPE_TXT, DNSConstants.CLASS_IN);
                 }
                 else
                 {
-                    c.resetTTL(rec);
-                    rec = c;
+                    c = (DNSRecord) cache.get(rec);
                 }
-            }
-            else
-            {
-                if (!expired)
+
+                if (c != null)
                 {
-                    isInformative = true;
-                    cache.add(rec);
+                    if (expired)
+                    {
+                        isInformative = true;
+                        cache.remove(c);
+                    }
+                    else
+                    {
+                        // If a TXT entry is received, if it has changed
+                        // update the cache and inform the outside world.
+                        if (rec instanceof DNSRecord.Text &&
+                                !rec.sameValue(c))
+                        {
+                            isInformative = true;
+                            cache.remove(c);
+                            cache.add(rec);
+                        }
+                        else
+                        {
+                            c.resetTTL(rec);
+                            rec = c;
+                        }
+                    }
+                }
+                else
+                {
+                    if (!expired)
+                    {
+                        isInformative = true;
+                        cache.add(rec);
+                    }
                 }
             }
             switch (rec.type)
@@ -1134,6 +1239,11 @@ public class JmDNSImpl extends JmDNS
     public void startAnnouncer()
     {
         new Announcer(this).start(timer);
+    }
+
+    public void startTextAnnouncer()
+    {
+        new TextAnnouncer(this).start(timer);
     }
 
     public void startRenewer()
