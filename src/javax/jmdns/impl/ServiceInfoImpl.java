@@ -493,7 +493,12 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
                     {
                         DNSRecord.Text txt = (DNSRecord.Text) rec;
                         setText(txt.text);
-                        getDns().handleNewTXT(this);
+
+                        // Only send TXT updates after it's handled the first time
+                        if (isHandled())
+                        {
+                            getDns().handleNewTXT(this);
+                        }
                     }
                     break;
             }
