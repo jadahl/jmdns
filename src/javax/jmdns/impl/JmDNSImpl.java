@@ -1038,19 +1038,6 @@ public class JmDNSImpl extends JmDNS
             // update the cache
             synchronized (cache)
             {
-                /*
-                 * NOTE TO SELF:
-
-
-                 Cache stores every different cache... 
-                 Change so that only one TXT is stored
-
-                 add here:
-                 check if TXT
-                 if TXT new behaviour -> look for TXT entry ->
-                 compare less than before (dont compare TXT fields)
-    
-*/
                 final DNSRecord c;
 
                 // Only store / use ONE TXT record in cache.
