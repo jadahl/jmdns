@@ -31,7 +31,7 @@ public abstract class JmDNS
     {
         return new JmDNSImpl();
     }
-    
+
     /**
      * Create an instance of JmDNS and bind it to a
      * specific network interface given its IP-address.
@@ -40,7 +40,7 @@ public abstract class JmDNS
     {
         return new JmDNSImpl(addr);
     }
-    
+
     /**
      * Return the HostName associated with this JmDNS instance.
      * Note: May not be the same as what started.  The host name is subject to

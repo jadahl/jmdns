@@ -180,8 +180,8 @@ public class JmDNSImpl extends JmDNS
     public JmDNSImpl() throws IOException
     {
         logger.finer("JmDNS instance created");
-        try
-        {
+        /*try
+        {*/
             final InetAddress addr = InetAddress.getLocalHost();
             init(addr.isLoopbackAddress() ? null : addr, addr.getHostName()); // [
             // PJYF
@@ -197,11 +197,11 @@ public class JmDNSImpl extends JmDNS
             // loopback
             // address
             // ?
-        }
+        /*}
         catch (final IOException e)
         {
             init(null, "computer");
-        }
+        }*/
     }
 
     /**
@@ -210,14 +210,15 @@ public class JmDNSImpl extends JmDNS
      */
     public JmDNSImpl(InetAddress addr) throws IOException
     {
-        try
-        {
-            init(addr, addr.getHostName());
-        }
+        /*try
+        {*/
+            name = addr.getHostName();
+            init(addr, name);
+        /*}
         catch (final IOException e)
         {
-            init(null, "computer");
-        }
+            init(null, name);
+        }*/
     }
 
     /**
