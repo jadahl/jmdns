@@ -179,4 +179,18 @@ public abstract class ServiceInfo
      */
     public abstract void setText(Hashtable props);
 
+    /**
+     * Add a service name listener. A service name listener is notified when
+     * the service name of a service is changed.
+     *
+     * @param listener the listener to be added.
+     */
+    public abstract void addServiceNameListener(ServiceNameListener listener);
+
+    /**
+     * Remove a service name listener.
+     *
+     * @param listener the listener to be removed
+     */
+    public abstract void removeServiceNameListener(ServiceNameListener listener);
 }

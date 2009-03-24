@@ -212,7 +212,7 @@ public class JmDNSImpl extends JmDNS
     {
         /*try
         {*/
-            name = addr.getHostName();
+            String name = addr.getHostName();
             init(addr, name);
         /*}
         catch (final IOException e)

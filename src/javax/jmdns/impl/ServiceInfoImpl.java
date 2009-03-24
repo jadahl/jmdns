@@ -12,9 +12,13 @@ import java.util.Enumeration;
 import java.util.Hashtable;
 import java.util.TimerTask;
 import java.util.Vector;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.logging.Logger;
 
 import javax.jmdns.ServiceInfo;
+import javax.jmdns.ServiceNameListener;
 import javax.jmdns.impl.DNSRecord.Pointer;
 import javax.jmdns.impl.DNSRecord.Service;
 import javax.jmdns.impl.DNSRecord.Text;
@@ -57,6 +61,12 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     Hashtable props;
     InetAddress addr;
     private boolean handled = false;
+
+
+    /**
+     * Service name change listeners.
+     */
+    private Set serviceNameListeners = new CopyOnWriteArraySet();
 
     /**
      * @see javax.jmdns.ServiceInfo#create(String, String, int, String)
@@ -165,7 +175,11 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
      */
     void setName(String name)
     {
+        String oldName = name;
         this.name = name;
+
+        if (!oldName.equals(name))
+            notifyServiceNameChanged(name, oldName);
     }
 
     /**
@@ -712,5 +726,22 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
     public JmDNSImpl getDns()
     {
         return dns;
+    }
+
+    private void notifyServiceNameChanged(String newName, String oldName) {
+        Iterator i = serviceNameListeners.iterator();
+        while (i.hasNext()) {
+            ServiceNameListener l = (ServiceNameListener) i.next();
+
+            l.serviceNameChanged(newName, oldName);
+        }
+    }
+
+    public void addServiceNameListener(ServiceNameListener listener) {
+        serviceNameListeners.add(listener);
+    }
+
+    public void removeServiceNameListener(ServiceNameListener listener) {
+        serviceNameListeners.remove(listener);
     }
 }
