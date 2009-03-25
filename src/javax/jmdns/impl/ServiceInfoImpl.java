@@ -175,7 +175,7 @@ public class ServiceInfoImpl extends ServiceInfo implements DNSListener
      */
     void setName(String name)
     {
-        String oldName = name;
+        String oldName = this.name;
         this.name = name;
 
         if (!oldName.equals(name))
