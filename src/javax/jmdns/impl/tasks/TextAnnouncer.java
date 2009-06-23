@@ -1,6 +1,5 @@
-//Copyright 2003-2005 Arthur van Hoff, Rick Blair
+//Copyright 2008-2009 Jonas Ådahl
 //Licensed under Apache License version 2.0
-//Original license LGPL
 
 package javax.jmdns.impl.tasks;
 
