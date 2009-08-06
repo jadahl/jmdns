@@ -294,6 +294,7 @@ public class JmDNSImpl extends JmDNS
             this.closeMulticastSocket();
         }
         socket = new MulticastSocket(DNSConstants.MDNS_PORT);
+
         if ((hostInfo != null) && (localHost.getInterface() != null))
         {
             // XXX doesn't work on Android 1.0
