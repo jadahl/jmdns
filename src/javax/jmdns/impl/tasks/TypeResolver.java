@@ -4,89 +4,91 @@
 
 package javax.jmdns.impl.tasks;
 
-import java.util.Iterator;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.jmdns.impl.DNSConstants;
 import javax.jmdns.impl.DNSOutgoing;
 import javax.jmdns.impl.DNSQuestion;
 import javax.jmdns.impl.DNSRecord;
-import javax.jmdns.impl.DNSState;
 import javax.jmdns.impl.JmDNSImpl;
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSRecordClass;
+import javax.jmdns.impl.constants.DNSRecordType;
 
 /**
  * Helper class to resolve service types.
  * <p/>
- * The TypeResolver queries three times consecutively for service types, and then
- * removes itself from the timer.
+ * The TypeResolver queries three times consecutively for service types, and then removes itself from the timer.
  * <p/>
  * The TypeResolver will run only if JmDNS is in state ANNOUNCED.
  */
-public class TypeResolver extends TimerTask
+public class TypeResolver extends Resolver
 {
-    static Logger logger = Logger.getLogger(TypeResolver.class.getName());
-
-    /**
-     * 
-     */
-    private final JmDNSImpl jmDNSImpl;
+    private static Logger logger = Logger.getLogger(TypeResolver.class.getName());
 
     /**
      * @param jmDNSImpl
      */
     public TypeResolver(JmDNSImpl jmDNSImpl)
     {
-        this.jmDNSImpl = jmDNSImpl;
+        super(jmDNSImpl);
     }
 
-    public void start(Timer timer)
-    {
-        timer.schedule(this, DNSConstants.QUERY_WAIT_INTERVAL, DNSConstants.QUERY_WAIT_INTERVAL);
-    }
-
-    /**
-     * Counts the number of queries that were sent.
+    /*
+     * (non-Javadoc)
+     *
+     * @see javax.jmdns.impl.tasks.Resolver#addAnswers(javax.jmdns.impl.DNSOutgoing)
      */
-    int count = 0;
+    @Override
+    protected boolean addAnswers(DNSOutgoing out)
+    {
+        boolean result = false;
+        long now = System.currentTimeMillis();
+        for (String type : this._jmDNSImpl.getServiceTypes().values())
+        {
+            try
+            {
+                out.addAnswer(new DNSRecord.Pointer("_services" + DNSConstants.DNS_META_QUERY + "local.", DNSRecordType.TYPE_PTR, DNSRecordClass.CLASS_IN, DNSRecordClass.NOT_UNIQUE, DNSConstants.DNS_TTL, type), now);
+                result = true;
+            }
+            catch (IOException exception)
+            {
+                logger.log(Level.WARNING, "addAnswers() exception ", exception);
+                break;
+            }
+        }
+        return result;
+    }
 
-    public void run()
+    /*
+     * (non-Javadoc)
+     *
+     * @see javax.jmdns.impl.tasks.Resolver#addQuestions(javax.jmdns.impl.DNSOutgoing)
+     */
+    @Override
+    protected boolean addQuestions(DNSOutgoing out)
     {
         try
         {
-            if (this.jmDNSImpl.getState() == DNSState.ANNOUNCED)
-            {
-                if (count++ < 3)
-                {
-                    logger.finer("run() JmDNS querying type");
-                    DNSOutgoing out = new DNSOutgoing(DNSConstants.FLAGS_QR_QUERY);
-                    out.addQuestion(new DNSQuestion("_services._mdns._udp.local.", DNSConstants.TYPE_PTR, DNSConstants.CLASS_IN));
-                    for (Iterator iterator = this.jmDNSImpl.getServiceTypes().values().iterator(); iterator.hasNext();)
-                    {
-                        out.addAnswer(new DNSRecord.Pointer("_services._mdns._udp.local.", DNSConstants.TYPE_PTR, DNSConstants.CLASS_IN, DNSConstants.DNS_TTL, (String) iterator.next()), 0);
-                    }
-                    this.jmDNSImpl.send(out);
-                }
-                else
-                {
-                    // After three queries, we can quit.
-                    this.cancel();
-                }
-            }
-            else
-            {
-                if (this.jmDNSImpl.getState() == DNSState.CANCELED)
-                {
-                    this.cancel();
-                }
-            }
+            out.addQuestion(DNSQuestion.newQuestion("_services" + DNSConstants.DNS_META_QUERY + "local.", DNSRecordType.TYPE_PTR, DNSRecordClass.CLASS_IN, DNSRecordClass.NOT_UNIQUE));
         }
-        catch (Throwable e)
+        catch (IOException exception)
         {
-            logger.log(Level.WARNING, "run() exception ", e);
-            this.jmDNSImpl.recover();
+            logger.log(Level.WARNING, "addQuestions() exception ", exception);
+            return false;
         }
+        return true;
+    }
+
+    /*
+     * (non-Javadoc)
+     *
+     * @see javax.jmdns.impl.tasks.Resolver#description()
+     */
+    @Override
+    protected String description()
+    {
+        return "querying type";
     }
 }

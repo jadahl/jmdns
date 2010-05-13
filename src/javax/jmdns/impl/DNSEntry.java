@@ -2,147 +2,226 @@
 //Licensed under Apache License version 2.0
 //Original license LGPL
 
-
 package javax.jmdns.impl;
 
-import java.util.logging.Logger;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+
+import javax.jmdns.impl.constants.DNSRecordClass;
+import javax.jmdns.impl.constants.DNSRecordType;
 
 /**
- * DNS entry with a name, type, and class. This is the base
- * class for questions and records.
+ * DNS entry with a name, type, and class. This is the base class for questions and records.
  *
  * @version %I%, %G%
- * @author	Arthur van Hoff, Pierre Frisch, Rick Blair
+ * @author Arthur van Hoff, Pierre Frisch, Rick Blair
  */
-public class DNSEntry
+public abstract class DNSEntry
 {
-    private static Logger logger = Logger.getLogger(DNSEntry.class.getName());
-    String key;
-    String name;
-    int type;
-    int clazz;
-    boolean unique;
+    // private static Logger logger = Logger.getLogger(DNSEntry.class.getName());
+    private final String _key;
+
+    private final String _name;
+
+    private final DNSRecordType _type;
+
+    private final DNSRecordClass _dnsClass;
+
+    private final boolean _unique;
 
     /**
      * Create an entry.
      */
-    DNSEntry(String name, int type, int clazz)
+    DNSEntry(String name, DNSRecordType type, DNSRecordClass recordClass, boolean unique)
     {
-        this.key = name.toLowerCase();
-        this.name = name;
-        this.type = type;
-        this.clazz = clazz & DNSConstants.CLASS_MASK;
-        this.unique = (clazz & DNSConstants.CLASS_UNIQUE) != 0;
+        _name = name;
+        _key = (name != null ? name.trim().toLowerCase() : null);
+        _type = type;
+        _dnsClass = recordClass;
+        _unique = unique;
     }
 
     /**
      * Check if two entries have exactly the same name, type, and class.
      */
+    @Override
     public boolean equals(Object obj)
     {
+        boolean result = false;
         if (obj instanceof DNSEntry)
         {
             DNSEntry other = (DNSEntry) obj;
-            return name.equals(other.name) && type == other.type && clazz == other.clazz;
+            result = this.getKey().equals(other.getKey()) && this.getRecordType().equals(other.getRecordType()) && _dnsClass == other.getRecordClass();
         }
-        return false;
+        return result;
     }
 
+    /**
+     * Returns teh name of this entry
+     *
+     * @return name of this entry
+     */
     public String getName()
     {
-        return name;
-    }
-
-    public int getType()
-    {
-        return type;
+        return (_name != null ? _name : "");
     }
 
     /**
-     * Overriden, to return a value which is consistent with the value returned
-     * by equals(Object).
+     * Returns the key for this entry. The key is the lower case name.
+     *
+     * @return key for this entry
      */
+    public String getKey()
+    {
+        return (_key != null ? _key : "");
+    }
+
+    /**
+     * @return record type
+     */
+    public DNSRecordType getRecordType()
+    {
+        return (_type != null ? _type : DNSRecordType.TYPE_IGNORE);
+    }
+
+    /**
+     * @return record class
+     */
+    public DNSRecordClass getRecordClass()
+    {
+        return (_dnsClass != null ? _dnsClass : DNSRecordClass.CLASS_UNKNOWN);
+    }
+
+    /**
+     * @return true if unique
+     */
+    public boolean isUnique()
+    {
+        return _unique;
+    }
+
+    /**
+     * Check if the record is expired.
+     */
+    abstract boolean isExpired(long now);
+
+    /**
+     * Check that 2 entries are of the same class.
+     *
+     * @param entry
+     * @return <code>true</code> is the two class are the same, <code>false</code> otherwise.
+     */
+    public boolean isSameRecordClass(DNSEntry entry)
+    {
+        return (entry != null) && (entry.getRecordClass() == this.getRecordClass());
+    }
+
+    /**
+     * Check that 2 entries are of the same type.
+     *
+     * @param entry
+     * @return <code>true</code> is the two type are the same, <code>false</code> otherwise.
+     */
+    public boolean isSameType(DNSEntry entry)
+    {
+        return (entry != null) && (entry.getRecordType() == this.getRecordType());
+    }
+
+    /**
+     * @param dout
+     * @throws IOException
+     */
+    protected void toByteArray(DataOutputStream dout) throws IOException
+    {
+        dout.write(this.getName().getBytes("UTF8"));
+        dout.writeShort(this.getRecordType().indexValue());
+        dout.writeShort(this.getRecordClass().indexValue());
+    }
+
+    /**
+     * Creates a byte array representation of this record. This is needed for tie-break tests according to draft-cheshire-dnsext-multicastdns-04.txt chapter 9.2.
+     *
+     * @return byte array representation
+     */
+    protected byte[] toByteArray()
+    {
+        try
+        {
+            ByteArrayOutputStream bout = new ByteArrayOutputStream();
+            DataOutputStream dout = new DataOutputStream(bout);
+            this.toByteArray(dout);
+            dout.close();
+            return bout.toByteArray();
+        }
+        catch (IOException e)
+        {
+            throw new InternalError();
+        }
+    }
+
+    /**
+     * Does a lexicographic comparison of the byte array representation of this record and that record. This is needed for tie-break tests according to draft-cheshire-dnsext-multicastdns-04.txt chapter 9.2.
+     *
+     * @param that
+     * @return a negative integer, zero, or a positive integer as this object is less than, equal to, or greater than the specified object.
+     */
+    public int compareTo(DNSEntry that)
+    {
+        byte[] thisBytes = this.toByteArray();
+        byte[] thatBytes = that.toByteArray();
+        for (int i = 0, n = Math.min(thisBytes.length, thatBytes.length); i < n; i++)
+        {
+            if (thisBytes[i] > thatBytes[i])
+            {
+                return 1;
+            }
+            else if (thisBytes[i] < thatBytes[i])
+            {
+                return -1;
+            }
+        }
+        return thisBytes.length - thatBytes.length;
+    }
+
+    /**
+     * Overriden, to return a value which is consistent with the value returned by equals(Object).
+     */
+    @Override
     public int hashCode()
     {
-        return name.hashCode() + type + clazz;
+        return _name.hashCode() + this.getRecordType().indexValue() + this.getRecordClass().indexValue();
+    }
+
+    /*
+     * (non-Javadoc)
+     *
+     * @see java.lang.Object#toString()
+     */
+    @Override
+    public String toString()
+    {
+        StringBuilder aLog = new StringBuilder();
+        aLog.append("[ " + this.getClass().getName());
+        aLog.append(" type: " + this.getRecordType());
+        aLog.append(", class: " + this.getRecordClass());
+        aLog.append((_unique ? "-unique," : ","));
+        aLog.append(" name: " + _name);
+        this.toString(aLog);
+        aLog.append(" ]");
+        return aLog.toString();
     }
 
     /**
-     * Get a string given a clazz.
+     * @param aLog
      */
-    static String getClazz(int clazz)
+    public void toString(StringBuilder aLog)
     {
-        switch (clazz & DNSConstants.CLASS_MASK)
-        {
-            case DNSConstants.CLASS_IN:
-                return "in";
-            case DNSConstants.CLASS_CS:
-                return "cs";
-            case DNSConstants.CLASS_CH:
-                return "ch";
-            case DNSConstants.CLASS_HS:
-                return "hs";
-            case DNSConstants.CLASS_NONE:
-                return "none";
-            case DNSConstants.CLASS_ANY:
-                return "any";
-            default:
-                return "?";
-        }
-    }
-
-    /**
-     * Get a string given a type.
-     */
-    static String getType(int type)
-    {
-        switch (type)
-        {
-            case DNSConstants.TYPE_A:
-                return "a";
-            case DNSConstants.TYPE_AAAA:
-                return "aaaa";
-            case DNSConstants.TYPE_NS:
-                return "ns";
-            case DNSConstants.TYPE_MD:
-                return "md";
-            case DNSConstants.TYPE_MF:
-                return "mf";
-            case DNSConstants.TYPE_CNAME:
-                return "cname";
-            case DNSConstants.TYPE_SOA:
-                return "soa";
-            case DNSConstants.TYPE_MB:
-                return "mb";
-            case DNSConstants.TYPE_MG:
-                return "mg";
-            case DNSConstants.TYPE_MR:
-                return "mr";
-            case DNSConstants.TYPE_NULL:
-                return "null";
-            case DNSConstants.TYPE_WKS:
-                return "wks";
-            case DNSConstants.TYPE_PTR:
-                return "ptr";
-            case DNSConstants.TYPE_HINFO:
-                return "hinfo";
-            case DNSConstants.TYPE_MINFO:
-                return "minfo";
-            case DNSConstants.TYPE_MX:
-                return "mx";
-            case DNSConstants.TYPE_TXT:
-                return "txt";
-            case DNSConstants.TYPE_SRV:
-                return "srv";
-            case DNSConstants.TYPE_ANY:
-                return "any";
-            default:
-                return "?";
-        }
+        aLog.append(super.toString());
     }
 
     public String toString(String hdr, String other)
     {
-        return hdr + "[" + getType(type) + "," + getClazz(clazz) + (unique ? "-unique," : ",") + name + ((other != null) ? "," + other + "]" : "]");
+        return hdr + "[" + this.getRecordType() + "," + this.getRecordClass() + (_unique ? "-unique," : ",") + _name + ((other != null) ? "," + other + "]" : "]");
     }
 }

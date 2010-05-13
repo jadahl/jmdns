@@ -15,6 +15,10 @@ import java.net.NetworkInterface;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSRecordClass;
+import javax.jmdns.impl.constants.DNSRecordType;
+
 /**
  * HostInfo information on the local host to be able to cope with change of addresses.
  *
@@ -24,9 +28,9 @@ import java.util.logging.Logger;
 public class HostInfo
 {
     private static Logger logger = Logger.getLogger(HostInfo.class.getName());
-    protected String name;
-    protected InetAddress address;
-    protected NetworkInterface interfaze;
+    protected String _name;
+    protected InetAddress _address;
+    protected NetworkInterface _interfaze;
     /**
      * This is used to create a unique name for the host name.
      */
@@ -35,13 +39,13 @@ public class HostInfo
     public HostInfo(InetAddress address, String name)
     {
         super();
-        this.address = address;
-        this.name = name;
+        this._address = address;
+        this._name = name;
         if (address != null)
         {
             try
             {
-                interfaze = NetworkInterface.getByInetAddress(address);
+                _interfaze = NetworkInterface.getByInetAddress(address);
             }
             catch (Exception exception)
             {
@@ -53,26 +57,26 @@ public class HostInfo
 
     public String getName()
     {
-        return name;
+        return _name;
     }
 
     public InetAddress getAddress()
     {
-        return address;
+        return _address;
     }
 
     public NetworkInterface getInterface()
     {
-        return interfaze;
+        return _interfaze;
     }
 
     synchronized String incrementHostName()
     {
         hostNameCount++;
-        int plocal = name.indexOf(".local.");
-        int punder = name.lastIndexOf("-");
-        name = name.substring(0, (punder == -1 ? plocal : punder)) + "-" + hostNameCount + ".local.";
-        return name;
+        int plocal = _name.indexOf(".local.");
+        int punder = _name.lastIndexOf("-");
+        _name = _name.substring(0, (punder == -1 ? plocal : punder)) + "-" + hostNameCount + ".local.";
+        return _name;
     }
 
     boolean shouldIgnorePacket(DatagramPacket packet)
@@ -104,29 +108,27 @@ public class HostInfo
 
     DNSRecord.Address getDNSAddressRecord(DNSRecord.Address address)
     {
-        return (DNSConstants.TYPE_AAAA == address.type ? getDNS6AddressRecord() : getDNS4AddressRecord());
+        return (DNSRecordType.TYPE_AAAA.equals(address.getRecordType()) ? this.getDNS6AddressRecord() : this.getDNS4AddressRecord());
     }
 
     public DNSRecord.Address getDNS4AddressRecord()
     {
-        if ((getAddress() != null) &&
-            ((getAddress() instanceof Inet4Address) ||
-            ((getAddress() instanceof Inet6Address) && (((Inet6Address) getAddress()).isIPv4CompatibleAddress()))))
-        {
-            return new DNSRecord.Address(getName(), DNSConstants.TYPE_A, DNSConstants.CLASS_IN, DNSConstants.DNS_TTL, getAddress());
+        if ((this.getAddress() instanceof Inet4Address) || ((this.getAddress() instanceof Inet6Address) && (((Inet6Address) this.getAddress()).isIPv4CompatibleAddress()))) {
+            return new DNSRecord.Address(this.getName(), DNSRecordType.TYPE_A, DNSRecordClass.CLASS_IN, DNSRecordClass.NOT_UNIQUE, DNSConstants.DNS_TTL, this.getAddress());
         }
         return null;
     }
 
     public DNSRecord.Address getDNS6AddressRecord()
     {
-        if ((getAddress() != null) && (getAddress() instanceof Inet6Address))
-        {
-            return new DNSRecord.Address(getName(), DNSConstants.TYPE_AAAA, DNSConstants.CLASS_IN, DNSConstants.DNS_TTL, getAddress());
+        if (this.getAddress() instanceof Inet6Address) {
+            return new DNSRecord.Address(this.getName(), DNSRecordType.TYPE_AAAA, DNSRecordClass.CLASS_IN,
+                    DNSRecordClass.NOT_UNIQUE, DNSConstants.DNS_TTL, this.getAddress());
         }
         return null;
     }
 
+    @Override
     public String toString()
     {
         StringBuffer buf = new StringBuffer();
@@ -142,7 +144,7 @@ public class HostInfo
 
     public void addAddressRecords(DNSOutgoing out, boolean authoritative) throws IOException
     {
-        DNSRecord answer = getDNS4AddressRecord();
+        DNSRecord answer = this.getDNS4AddressRecord();
         if (answer != null)
         {
             if (authoritative)
@@ -154,8 +156,8 @@ public class HostInfo
                 out.addAnswer(answer, 0);
             }
         }
-        
-        answer = getDNS6AddressRecord();
+
+        answer = this.getDNS6AddressRecord();
         if (answer != null)
         {
             if (authoritative)

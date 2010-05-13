@@ -4,49 +4,45 @@
 
 package javax.jmdns.impl.tasks;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.Collection;
 import java.util.Timer;
-import java.util.TimerTask;
 import java.util.logging.Logger;
 
-import javax.jmdns.impl.DNSCache;
-import javax.jmdns.impl.DNSConstants;
+import javax.jmdns.impl.DNSEntry;
 import javax.jmdns.impl.DNSRecord;
-import javax.jmdns.impl.DNSState;
 import javax.jmdns.impl.JmDNSImpl;
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSState;
 
 /**
- * Periodicaly removes expired entries from the cache.
+ * Periodically removes expired entries from the cache.
  */
-public class RecordReaper extends TimerTask
+public class RecordReaper extends DNSTask
 {
     static Logger logger = Logger.getLogger(RecordReaper.class.getName());
-
-    /**
-     * 
-     */
-    private final JmDNSImpl jmDNSImpl;
 
     /**
      * @param jmDNSImpl
      */
     public RecordReaper(JmDNSImpl jmDNSImpl)
     {
-        this.jmDNSImpl = jmDNSImpl;
+        super(jmDNSImpl);
     }
 
     public void start(Timer timer)
     {
-        timer.schedule(this, DNSConstants.RECORD_REAPER_INTERVAL, DNSConstants.RECORD_REAPER_INTERVAL);
+        if (this._jmDNSImpl.getState() != DNSState.CANCELED)
+        {
+            timer.schedule(this, DNSConstants.RECORD_REAPER_INTERVAL, DNSConstants.RECORD_REAPER_INTERVAL);
+        }
     }
 
+    @Override
     public void run()
     {
-        synchronized (this.jmDNSImpl)
+        synchronized (this._jmDNSImpl)
         {
-            if (this.jmDNSImpl.getState() == DNSState.CANCELED)
+            if (this._jmDNSImpl.getState() == DNSState.CANCELED)
             {
                 return;
             }
@@ -56,26 +52,16 @@ public class RecordReaper extends TimerTask
             // -------------------------------------
             // To prevent race conditions, we defensively copy all cache
             // entries into a list.
-            List list = new ArrayList();
-            synchronized (this.jmDNSImpl.getCache())
-            {
-                for (Iterator i = this.jmDNSImpl.getCache().iterator(); i.hasNext();)
-                {
-                    for (DNSCache.CacheNode n = (DNSCache.CacheNode) i.next(); n != null; n = n.next())
-                    {
-                        list.add(n.getValue());
-                    }
-                }
-            }
+            Collection<? extends DNSEntry> dnsEntryLits = this._jmDNSImpl.getCache().allValues();
             // Now, we remove them.
             long now = System.currentTimeMillis();
-            for (Iterator i = list.iterator(); i.hasNext();)
+            for (DNSEntry entry : dnsEntryLits)
             {
-                DNSRecord c = (DNSRecord) i.next();
-                if (c.isExpired(now))
+                DNSRecord record = (DNSRecord) entry;
+                if (record.isExpired(now))
                 {
-                    this.jmDNSImpl.updateRecord(now, c);
-                    this.jmDNSImpl.getCache().remove(c);
+                    this._jmDNSImpl.updateRecord(now, record);
+                    this._jmDNSImpl.getCache().removeDNSEntry(record);
                 }
             }
         }

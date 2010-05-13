@@ -9,6 +9,9 @@ import java.net.DatagramPacket;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSState;
+
 /**
  * Listen for multicast packets.
  */
@@ -17,16 +20,16 @@ class SocketListener implements Runnable
     static Logger logger = Logger.getLogger(SocketListener.class.getName());
 
     /**
-     * 
+     *
      */
-    private final JmDNSImpl jmDNSImpl;
+    private final JmDNSImpl _jmDNSImpl;
 
     /**
      * @param jmDNSImpl
      */
     SocketListener(JmDNSImpl jmDNSImpl)
     {
-        this.jmDNSImpl = jmDNSImpl;
+        this._jmDNSImpl = jmDNSImpl;
     }
 
     public void run()
@@ -35,38 +38,46 @@ class SocketListener implements Runnable
         {
             byte buf[] = new byte[DNSConstants.MAX_MSG_ABSOLUTE];
             DatagramPacket packet = new DatagramPacket(buf, buf.length);
-            while (this.jmDNSImpl.getState() != DNSState.CANCELED)
+            while (this._jmDNSImpl.getState() != DNSState.CANCELED)
             {
                 packet.setLength(buf.length);
-                this.jmDNSImpl.getSocket().receive(packet);
-                if (this.jmDNSImpl.getState() == DNSState.CANCELED)
+                this._jmDNSImpl.getSocket().receive(packet);
+                if (this._jmDNSImpl.getState() == DNSState.CANCELED)
                 {
                     break;
                 }
                 try
                 {
-                    if (this.jmDNSImpl.getLocalHost().shouldIgnorePacket(packet))
+                    if (this._jmDNSImpl.getLocalHost().shouldIgnorePacket(packet))
                     {
                         continue;
                     }
 
                     DNSIncoming msg = new DNSIncoming(packet);
-                    logger.finest("SocketListener.run() JmDNS in:" + msg.print(true));
+                    if (logger.isLoggable(Level.FINEST))
+                    {
+                        logger.finest("SocketListener.run() JmDNS in:" + msg.print(true));
+                    }
 
-                    synchronized (this.jmDNSImpl.getIoLock())
+                    this._jmDNSImpl.ioLock();
+                    try
                     {
                         if (msg.isQuery())
                         {
                             if (packet.getPort() != DNSConstants.MDNS_PORT)
                             {
-                                this.jmDNSImpl.handleQuery(msg, packet.getAddress(), packet.getPort());
+                                this._jmDNSImpl.handleQuery(msg, packet.getAddress(), packet.getPort());
                             }
-                            this.jmDNSImpl.handleQuery(msg, this.jmDNSImpl.getGroup(), DNSConstants.MDNS_PORT);
+                            this._jmDNSImpl.handleQuery(msg, this._jmDNSImpl.getGroup(), DNSConstants.MDNS_PORT);
                         }
                         else
                         {
-                            this.jmDNSImpl.handleResponse(msg);
+                            this._jmDNSImpl.handleResponse(msg);
                         }
+                    }
+                    finally
+                    {
+                        this._jmDNSImpl.ioUnlock();
                     }
                 }
                 catch (IOException e)
@@ -77,11 +88,21 @@ class SocketListener implements Runnable
         }
         catch (IOException e)
         {
-            if (this.jmDNSImpl.getState() != DNSState.CANCELED)
+            if (this._jmDNSImpl.getState() != DNSState.CANCELED)
             {
                 logger.log(Level.WARNING, "run() exception ", e);
-                this.jmDNSImpl.recover();
+                this._jmDNSImpl.recover();
             }
+        }
+        // jP: 20010-01-18. Per issue #2933183. If this thread was stopped
+        // by closeMulticastSocket, we need to signal the other party via
+        // the jmDNS monitor. The other guy will then check to see if this
+        // thread has died.
+        // Note: This is placed here to avoid locking the IoLock object and
+        // 'this' instance together.
+        synchronized (this._jmDNSImpl)
+        {
+            this._jmDNSImpl.notifyAll();
         }
     }
 }

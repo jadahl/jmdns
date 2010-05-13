@@ -4,31 +4,24 @@
 
 package javax.jmdns.impl.tasks;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
 import java.util.Timer;
-import java.util.TimerTask;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.jmdns.impl.DNSConstants;
+import javax.jmdns.ServiceInfo;
 import javax.jmdns.impl.DNSOutgoing;
-import javax.jmdns.impl.DNSState;
 import javax.jmdns.impl.JmDNSImpl;
 import javax.jmdns.impl.ServiceInfoImpl;
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSState;
 
 /**
- * The Renewer is there to send renewal announcment when the record expire for ours infos.
+ * The Renewer is there to send renewal announcement when the record expire for ours infos.
  */
-public class Renewer extends TimerTask
+public class Renewer extends DNSTask
 {
     static Logger logger = Logger.getLogger(Renewer.class.getName());
 
-    /**
-     * 
-     */
-    private final JmDNSImpl jmDNSImpl;
     /**
      * The state of the announcer.
      */
@@ -36,119 +29,77 @@ public class Renewer extends TimerTask
 
     public Renewer(JmDNSImpl jmDNSImpl)
     {
-        this.jmDNSImpl = jmDNSImpl;
-        // Associate host to this, if it needs renewal
-        if (this.jmDNSImpl.getState() == DNSState.ANNOUNCED)
-        {
-            this.jmDNSImpl.setTask(this);
-        }
-        // Associate services to this, if they need renewal
-        synchronized (this.jmDNSImpl)
-        {
-            for (Iterator s = this.jmDNSImpl.getServices().values().iterator(); s.hasNext();)
-            {
-                ServiceInfoImpl info = (ServiceInfoImpl) s.next();
-                if (info.getState() == DNSState.ANNOUNCED)
-                {
-                    info.setTask(this);
-                }
-            }
-        }
+        super(jmDNSImpl);
+
+        this.associate(DNSState.ANNOUNCED);
     }
 
     public void start(Timer timer)
     {
-        timer.schedule(this, DNSConstants.ANNOUNCED_RENEWAL_TTL_INTERVAL, DNSConstants.ANNOUNCED_RENEWAL_TTL_INTERVAL);
+        if (this._jmDNSImpl.getState() != DNSState.CANCELED)
+        {
+            timer.schedule(this, DNSConstants.ANNOUNCED_RENEWAL_TTL_INTERVAL, DNSConstants.ANNOUNCED_RENEWAL_TTL_INTERVAL);
+        }
     }
 
+    @Override
     public boolean cancel()
     {
-        // Remove association from host to this
-        if (this.jmDNSImpl.getTask() == this)
-        {
-            this.jmDNSImpl.setTask(null);
-        }
-
-        // Remove associations from services to this
-        synchronized (this.jmDNSImpl)
-        {
-            for (Iterator i = this.jmDNSImpl.getServices().values().iterator(); i.hasNext();)
-            {
-                ServiceInfoImpl info = (ServiceInfoImpl) i.next();
-                if (info.getTask() == this)
-                {
-                    info.setTask(null);
-                }
-            }
-        }
+        this.removeAssociation();
 
         return super.cancel();
     }
 
+    @Override
     public void run()
     {
-        DNSOutgoing out = null;
+        DNSOutgoing out = new DNSOutgoing(DNSConstants.FLAGS_QR_RESPONSE | DNSConstants.FLAGS_AA);
         try
         {
             // send probes for JmDNS itself
-            if (this.jmDNSImpl.getState() == taskState)
+            synchronized (_jmDNSImpl)
             {
-                if (out == null)
+                if ((this._jmDNSImpl.getTask() == this) && this._jmDNSImpl.getState() == taskState)
                 {
-                    out = new DNSOutgoing(DNSConstants.FLAGS_QR_RESPONSE | DNSConstants.FLAGS_AA);
+                    this._jmDNSImpl.getLocalHost().addAddressRecords(out, false);
+                    this._jmDNSImpl.advanceState();
                 }
-                this.jmDNSImpl.getLocalHost().addAddressRecords(out, false);
-                this.jmDNSImpl.advanceState();
             }
             // send announces for services
-            // Defensively copy the services into a local list,
-            // to prevent race conditions with methods registerService
-            // and unregisterService.
-            List list;
-            synchronized (this.jmDNSImpl)
+            for (ServiceInfo serviceInfo : this._jmDNSImpl.getServices().values())
             {
-                list = new ArrayList(this.jmDNSImpl.getServices().values());
-            }
-            for (Iterator i = list.iterator(); i.hasNext();)
-            {
-                ServiceInfoImpl info = (ServiceInfoImpl) i.next();
+                ServiceInfoImpl info = (ServiceInfoImpl) serviceInfo;
                 synchronized (info)
                 {
-                    if (info.getState() == taskState && info.getTask() == this)
+                    if ((info.getTask() == this) && info.getState().isAnnounced())
                     {
                         info.advanceState();
-                        logger.finer("run() JmDNS announced " + info.getQualifiedName() + " state " + info.getState());
-                        if (out == null)
-                        {
-                            out = new DNSOutgoing(DNSConstants.FLAGS_QR_RESPONSE | DNSConstants.FLAGS_AA);
-                        }
-                        info.addAnswers(out, DNSConstants.DNS_TTL, this.jmDNSImpl.getLocalHost());
+                        logger.finer("run() JmDNS announcing " + info.getQualifiedName() + " state " + info.getState());
+                        info.addAnswers(out, DNSConstants.DNS_TTL, this._jmDNSImpl.getLocalHost());
                     }
                 }
             }
-            if (out != null)
+            if (!out.isEmpty())
             {
                 logger.finer("run() JmDNS announced");
-                this.jmDNSImpl.send(out);
+                this._jmDNSImpl.send(out);
             }
             else
             {
-                // If we have nothing to send, another timer taskState ahead
-                // of us has done the job for us. We can cancel.
+                // If we have nothing to send, another timer taskState ahead of us has done the job for us. We can cancel.
                 cancel();
             }
         }
         catch (Throwable e)
         {
             logger.log(Level.WARNING, "run() exception ", e);
-            this.jmDNSImpl.recover();
+            this._jmDNSImpl.recover();
         }
 
         taskState = taskState.advance();
         if (!taskState.isAnnounced())
         {
             cancel();
-
         }
     }
 }

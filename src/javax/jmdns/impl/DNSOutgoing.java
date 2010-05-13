@@ -2,88 +2,109 @@
 //Licensed under Apache License version 2.0
 //Original license LGPL
 
-
 package javax.jmdns.impl;
 
 import java.io.IOException;
 import java.util.Hashtable;
-import java.util.LinkedList;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import javax.jmdns.impl.constants.DNSConstants;
+import javax.jmdns.impl.constants.DNSRecordClass;
 
 /**
  * An outgoing DNS message.
  *
  * @version %I%, %G%
- * @author	Arthur van Hoff, Rick Blair, Werner Randelshofer
+ * @author Arthur van Hoff, Rick Blair, Werner Randelshofer
  */
-public final class DNSOutgoing
+public final class DNSOutgoing extends DNSMessage
 {
     /**
-     * This can be used to turn off domain name compression.  This was helpful for 
-     * tracking problems interacting with other mdns implementations.
+     * This can be used to turn off domain name compression. This was helpful for tracking problems interacting with other mdns implementations.
      */
     public static boolean USE_DOMAIN_NAME_COMPRESSION = true;
-    
-    private static Logger logger = Logger.getLogger(DNSOutgoing.class.getName());
-    int id;
-    int flags;
-    private boolean multicast;
-    private int numQuestions;
-    private int numAnswers;
-    private int numAuthorities;
-    private int numAdditionals;
-    private Hashtable names;
 
-    byte data[];
-    int off;
-    int len;
+    private static Logger logger = Logger.getLogger(DNSOutgoing.class.getName());
+
+    private Map<String, Integer> _names;
+
+    byte[] _data;
+
+    int _off;
+
+    int _len;
 
     /**
      * Create an outgoing multicast query or response.
+     *
+     * @param flags
      */
     public DNSOutgoing(int flags)
     {
-        this(flags, true);
+        this(flags, true, DNSConstants.MAX_MSG_TYPICAL);
     }
 
     /**
      * Create an outgoing query or response.
+     *
+     * @param flags
+     * @param multicast
      */
     public DNSOutgoing(int flags, boolean multicast)
     {
-        this.flags = flags;
-        this.multicast = multicast;
-        names = new Hashtable();
-        data = new byte[DNSConstants.MAX_MSG_TYPICAL];
-        off = 12;
+        this(flags, multicast, DNSConstants.MAX_MSG_TYPICAL);
+    }
+
+    /**
+     * Create an outgoing query or response.
+     *
+     * @param flags
+     * @param multicast
+     * @param senderUDPPayload
+     *            The sender's UDP payload size is the number of bytes of the largest UDP payload that can be reassembled and delivered in the sender's network stack.
+     */
+    public DNSOutgoing(int flags, boolean multicast, int senderUDPPayload)
+    {
+        super(flags, 0, multicast);
+        _names = new Hashtable<String, Integer>();
+        _data = new byte[senderUDPPayload];
+        _off = 12;
     }
 
     /**
      * Add a question to the message.
+     *
+     * @param rec
+     * @throws IOException
      */
     public void addQuestion(DNSQuestion rec) throws IOException
     {
-        if (numAnswers > 0 || numAuthorities > 0 || numAdditionals > 0)
+        if (this.getNumberOfAnswers() > 0 || this.getNumberOfAuthorities() > 0 || this.getNumberOfAdditionals() > 0)
         {
             throw new IllegalStateException("Questions must be added before answers");
         }
-        numQuestions++;
-        writeQuestion(rec);
+        _questions.add(rec);
+        this.writeQuestion(rec);
     }
 
     /**
      * Add an answer if it is not suppressed.
+     *
+     * @param in
+     * @param rec
+     * @throws IOException
      */
-    void addAnswer(DNSIncoming in, DNSRecord rec) throws IOException
+    public void addAnswer(DNSIncoming in, DNSRecord rec) throws IOException
     {
-        if (numAuthorities > 0 || numAdditionals > 0)
+        if (this.getNumberOfAuthorities() > 0 || this.getNumberOfAdditionals() > 0)
         {
             throw new IllegalStateException("Answers must be added before authorities and additionals");
         }
         if (!rec.suppressedBy(in))
         {
-            addAnswer(rec, 0);
+            this.addAnswer(rec, 0);
         }
     }
 
@@ -92,19 +113,23 @@ public final class DNSOutgoing
      */
     void addAdditionalAnswer(DNSIncoming in, DNSRecord rec) throws IOException
     {
-        if ((off < DNSConstants.MAX_MSG_TYPICAL - 200) && !rec.suppressedBy(in))
+        if ((_off < _data.length - 200) && !rec.suppressedBy(in))
         {
-            writeRecord(rec, 0);
-            numAdditionals++;
+            _additionals.add(rec);
+            this.writeRecord(rec, 0);
         }
     }
 
     /**
      * Add an answer to the message.
+     *
+     * @param rec
+     * @param now
+     * @throws IOException
      */
     public void addAnswer(DNSRecord rec, long now) throws IOException
     {
-        if (numAuthorities > 0 || numAdditionals > 0)
+        if (this.getNumberOfAuthorities() > 0 || this.getNumberOfAdditionals() > 0)
         {
             throw new IllegalStateException("Questions must be added before answers");
         }
@@ -112,26 +137,26 @@ public final class DNSOutgoing
         {
             if ((now == 0) || !rec.isExpired(now))
             {
-                writeRecord(rec, now);
-                numAnswers++;
+                _answers.add(rec);
+                this.writeRecord(rec, now);
             }
         }
     }
 
-    private LinkedList authorativeAnswers = new LinkedList();
-
     /**
      * Add an authorative answer to the message.
+     *
+     * @param rec
+     * @throws IOException
      */
     public void addAuthorativeAnswer(DNSRecord rec) throws IOException
     {
-        if (numAdditionals > 0)
+        if (this.getNumberOfAdditionals() > 0)
         {
             throw new IllegalStateException("Authorative answers must be added before additional answers");
         }
-        authorativeAnswers.add(rec);
-        writeRecord(rec, 0);
-        numAuthorities++;
+        _authoritativeAnswers.add(rec);
+        this.writeRecord(rec, 0);
 
         // VERIFY:
 
@@ -139,11 +164,11 @@ public final class DNSOutgoing
 
     void writeByte(int value) throws IOException
     {
-        if (off >= data.length)
+        if (_off >= _data.length)
         {
             throw new IOException("buffer full");
         }
-        data[off++] = (byte) value;
+        _data[_off++] = (byte) value;
     }
 
     void writeBytes(String str, int off, int len) throws IOException
@@ -236,158 +261,208 @@ public final class DNSOutgoing
     {
         writeName(name, true);
     }
-    
+
     void writeName(String name, boolean useCompression) throws IOException
     {
+        String aName = name;
         while (true)
         {
-            int n = name.indexOf('.');
+            int n = aName.indexOf('.');
             if (n < 0)
             {
-                n = name.length();
+                n = aName.length();
             }
             if (n <= 0)
             {
                 writeByte(0);
                 return;
             }
-            if(useCompression && USE_DOMAIN_NAME_COMPRESSION){
-                Integer offset = (Integer) names.get(name);
+            if (useCompression && USE_DOMAIN_NAME_COMPRESSION)
+            {
+                Integer offset = _names.get(aName);
                 if (offset != null)
                 {
                     int val = offset.intValue();
 
-                    if (val > off)
+                    if (val > _off)
                     {
-                        logger.log(Level.WARNING, "DNSOutgoing writeName failed val=" + val + " name=" + name);
+                        logger.log(Level.WARNING, "DNSOutgoing writeName failed val=" + val + " name=" + aName);
                     }
 
                     writeByte((val >> 8) | 0xC0);
                     writeByte(val & 0xFF);
                     return;
                 }
-                names.put(name, new Integer(off));
+                _names.put(aName, Integer.valueOf(_off));
             }
-            writeUTF(name, 0, n);
-            name = name.substring(n);
-            if (name.startsWith("."))
+            writeUTF(aName, 0, n);
+            aName = aName.substring(n);
+            if (aName.startsWith("."))
             {
-                name = name.substring(1);
+                aName = aName.substring(1);
             }
         }
     }
 
     void writeQuestion(DNSQuestion question) throws IOException
     {
-        writeName(question.name);
-        writeShort(question.type);
-        writeShort(question.clazz);
+        writeName(question.getName());
+        writeShort(question.getRecordType().indexValue());
+        writeShort(question.getRecordClass().indexValue());
     }
 
     void writeRecord(DNSRecord rec, long now) throws IOException
     {
-        int save = off;
+        int save = _off;
         try
         {
-            writeName(rec.name);
-            writeShort(rec.type);
-            writeShort(rec.clazz | ((rec.unique && multicast) ? DNSConstants.CLASS_UNIQUE : 0));
-            writeInt((now == 0) ? rec.getTtl() : rec.getRemainingTTL(now));
+            writeName(rec.getName());
+            writeShort(rec.getRecordType().indexValue());
+            writeShort(rec.getRecordClass().indexValue() | ((rec.isUnique() && this.isMulticast()) ? DNSRecordClass.CLASS_UNIQUE : 0));
+            writeInt((now == 0) ? rec.getTTL() : rec.getRemainingTTL(now));
             writeShort(0);
-            int start = off;
+            int start = _off;
             rec.write(this);
-            int len = off - start;
-            data[start - 2] = (byte) (len >> 8);
-            data[start - 1] = (byte) (len & 0xFF);
+            int len = _off - start;
+            _data[start - 2] = (byte) (len >> 8);
+            _data[start - 1] = (byte) (len & 0xFF);
         }
         catch (IOException e)
         {
-            off = save;
+            _off = save;
             throw e;
         }
     }
 
     /**
      * Finish the message before sending it off.
+     *
+     * @throws IOException
      */
     void finish() throws IOException
     {
-        int save = off;
-        off = 0;
+        int save = _off;
+        _off = 0;
 
-        writeShort(multicast ? 0 : id);
-        writeShort(flags);
-        writeShort(numQuestions);
-        writeShort(numAnswers);
-        writeShort(numAuthorities);
-        writeShort(numAdditionals);
-        off = save;
+        writeShort(_multicast ? 0 : _id);
+        writeShort(_flags);
+        writeShort(this.getNumberOfQuestions());
+        writeShort(this.getNumberOfAnswers());
+        writeShort(this.getNumberOfAuthorities());
+        writeShort(this.getNumberOfAdditionals());
+        _off = save;
     }
 
-    boolean isQuery()
+    @Override
+    public boolean isQuery()
     {
-        return (flags & DNSConstants.FLAGS_QR_MASK) == DNSConstants.FLAGS_QR_QUERY;
+        return (_flags & DNSConstants.FLAGS_QR_MASK) == DNSConstants.FLAGS_QR_QUERY;
     }
 
-    public boolean isEmpty()
-    {
-        return numQuestions == 0 && numAuthorities == 0
-            && numAdditionals == 0 && numAnswers == 0;
-    }
-
-
+    @Override
     public String toString()
     {
         StringBuffer buf = new StringBuffer();
-        buf.append(isQuery() ? "dns[query," : "dns[response,");
-        //buf.append(packet.getAddress().getHostAddress());
-        buf.append(':');
-        //buf.append(packet.getPort());
-        //buf.append(",len=");
-        //buf.append(packet.getLength());
-        buf.append(",id=0x");
-        buf.append(Integer.toHexString(id));
-        if (flags != 0)
+        buf.append(isQuery() ? "dns[query:" : "dns[response:");
+        buf.append(" id=0x");
+        buf.append(Integer.toHexString(_id));
+        if (_flags != 0)
         {
-            buf.append(",flags=0x");
-            buf.append(Integer.toHexString(flags));
-            if ((flags & DNSConstants.FLAGS_QR_RESPONSE) != 0)
+            buf.append(", flags=0x");
+            buf.append(Integer.toHexString(_flags));
+            if ((_flags & DNSConstants.FLAGS_QR_RESPONSE) != 0)
             {
                 buf.append(":r");
             }
-            if ((flags & DNSConstants.FLAGS_AA) != 0)
+            if ((_flags & DNSConstants.FLAGS_AA) != 0)
             {
                 buf.append(":aa");
             }
-            if ((flags & DNSConstants.FLAGS_TC) != 0)
+            if ((_flags & DNSConstants.FLAGS_TC) != 0)
             {
                 buf.append(":tc");
             }
         }
-        if (numQuestions > 0)
+        if (this.getNumberOfQuestions() > 0)
         {
-            buf.append(",questions=");
-            buf.append(numQuestions);
+            buf.append(", questions=");
+            buf.append(this.getNumberOfQuestions());
         }
-        if (numAnswers > 0)
+        if (this.getNumberOfAnswers() > 0)
         {
-            buf.append(",answers=");
-            buf.append(numAnswers);
+            buf.append(", answers=");
+            buf.append(this.getNumberOfAnswers());
         }
-        if (numAuthorities > 0)
+        if (this.getNumberOfAuthorities() > 0)
         {
-            buf.append(",authorities=");
-            buf.append(numAuthorities);
+            buf.append(", authorities=");
+            buf.append(this.getNumberOfAuthorities());
         }
-        if (numAdditionals > 0)
+        if (this.getNumberOfAdditionals() > 0)
         {
-            buf.append(",additionals=");
-            buf.append(numAdditionals);
+            buf.append(", additionals=");
+            buf.append(this.getNumberOfAdditionals());
         }
-        buf.append(",\nnames=" + names);
-        buf.append(",\nauthorativeAnswers=" + authorativeAnswers);
+        buf.append(",\nnames=" + _names);
+        buf.append(",\nauthorativeAnswers=" + _authoritativeAnswers);
 
         buf.append("]");
+        return buf.toString();
+    }
+
+    /**
+     * Debugging.
+     */
+    String print(boolean dump)
+    {
+        StringBuffer buf = new StringBuffer();
+        buf.append(this.print());
+        if (dump)
+        {
+            for (int off = 0, len = _data.length; off < len; off += 32)
+            {
+                int n = Math.min(32, len - off);
+                if (off < 10)
+                {
+                    buf.append(' ');
+                }
+                if (off < 100)
+                {
+                    buf.append(' ');
+                }
+                buf.append(off);
+                buf.append(':');
+                for (int i = 0; i < n; i++)
+                {
+                    if ((i % 8) == 0)
+                    {
+                        buf.append(' ');
+                    }
+                    buf.append(Integer.toHexString((_data[off + i] & 0xF0) >> 4));
+                    buf.append(Integer.toHexString((_data[off + i] & 0x0F) >> 0));
+                }
+                buf.append("\n");
+                buf.append("    ");
+                for (int i = 0; i < n; i++)
+                {
+                    if ((i % 8) == 0)
+                    {
+                        buf.append(' ');
+                    }
+                    buf.append(' ');
+                    int ch = _data[off + i] & 0xFF;
+                    buf.append(((ch > ' ') && (ch < 127)) ? (char) ch : '.');
+                }
+                buf.append("\n");
+
+                // limit message size
+                if (off + 32 >= 256)
+                {
+                    buf.append("....\n");
+                    break;
+                }
+            }
+        }
         return buf.toString();
     }
 
